@@ -1,8 +1,8 @@
 function App() {
   return (
-    <div style={{ padding: 40, fontFamily: 'sans-serif', color: '#fff', background: '#111', minHeight: '100vh' }}>
-      <h1>Ino Voice Maker</h1>
-      <p>Robot SFX designer â€” coming soon.</p>
+    <div className="min-h-screen bg-zinc-950 text-white p-10">
+      <h1 className="text-3xl font-bold">Ino Voice Maker</h1>
+      <p className="text-white/60 mt-2">Robot SFX designer â€” coming soon.</p>
     </div>
   )
 }
