@@ -1,0 +1,125 @@
+import React, { useMemo, useRef, useState } from 'react';
+import { clamp } from '../utils/dsp';
+
+export default function GraphEditor({
+  title,
+  points,
+  setPoints,
+  yMin,
+  yMax,
+  yFormat,
+  height = 160,
+  width = 560,
+}) {
+  const svgRef = useRef(null);
+  const [dragIdx, setDragIdx] = useState(null);
+
+  const pad = 12;
+  const innerW = width - pad * 2;
+  const innerH = height - pad * 2;
+
+  const toSvg = (p) => ({
+    x: pad + p.x * innerW,
+    y: pad + (1 - clamp((p.y - yMin) / (yMax - yMin), 0, 1)) * innerH,
+  });
+
+  const fromSvg = (sx, sy) => {
+    const nx = clamp((sx - pad) / innerW, 0, 1);
+    const ny = clamp(1 - (sy - pad) / innerH, 0, 1);
+    return { x: nx, y: yMin + ny * (yMax - yMin) };
+  };
+
+  const pathD = useMemo(() => {
+    const sorted = [...points].sort((a, b) => a.x - b.x);
+    return sorted
+      .map((p, i) => {
+        const s = toSvg(p);
+        return `  `;
+      })
+      .join(' ');
+  }, [points, innerW, innerH, yMin, yMax]);
+
+  const onPointerDown = (e) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const sorted = [...points].sort((a, b) => a.x - b.x);
+    for (let i = 0; i < sorted.length; i++) {
+      const s = toSvg(sorted[i]);
+      if ((s.x - mx) ** 2 + (s.y - my) ** 2 <= 196) {
+        setDragIdx(points.indexOf(sorted[i]));
+        return;
+      }
+    }
+
+    const np = fromSvg(mx, my);
+    setPoints((prev) => {
+      const next = [...prev, np].sort((a, b) => a.x - b.x);
+      next[0] = { ...next[0], x: 0 };
+      next[next.length - 1] = { ...next[next.length - 1], x: 1 };
+      return next;
+    });
+  };
+
+  const onPointerMove = (e) => {
+    if (dragIdx == null) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const np = fromSvg(e.clientX - rect.left, e.clientY - rect.top);
+
+    setPoints((prev) => {
+      const next = [...prev];
+      const isFirst = dragIdx === 0;
+      const isLast = dragIdx === prev.length - 1;
+      const left = dragIdx > 0 ? next[dragIdx - 1].x : 0;
+      const right = dragIdx < next.length - 1 ? next[dragIdx + 1].x : 1;
+      next[dragIdx] = {
+        x: clamp(np.x, isFirst ? 0 : isLast ? 1 : left + 0.01, isFirst ? 0 : isLast ? 1 : right - 0.01),
+        y: clamp(np.y, yMin, yMax),
+      };
+      return next;
+    });
+  };
+
+  const onPointerUp = () => setDragIdx(null);
+
+  return (
+    <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-white font-semibold">{title}</div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setPoints((p) => p.length > 2 ? [...p.slice(0, -2), p[p.length - 1]] : p)}
+            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-sm"
+          >Remove point</button>
+          <button
+            onClick={() => setPoints([{ x: 0, y: (yMin + yMax) / 2 }, { x: 1, y: (yMin + yMax) / 2 }])}
+            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-sm"
+          >Reset</button>
+        </div>
+      </div>
+      <svg
+        ref={svgRef}
+        width={width}
+        height={height}
+        className="w-full h-auto rounded-xl bg-black/30 border border-white/10"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+      >
+        <path d={pathD} fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth={2.2} />
+        {[...points].sort((a, b) => a.x - b.x).map((p, i) => {
+          const s = toSvg(p);
+          return <circle key={i} cx={s.x} cy={s.y} r={5} fill="rgba(255,255,255,0.9)" />;
+        })}
+        <text x={14} y={18} fill="rgba(255,255,255,0.5)" fontSize="11">{yFormat(yMax)}</text>
+        <text x={14} y={height - 8} fill="rgba(255,255,255,0.5)" fontSize="11">{yFormat(yMin)}</text>
+      </svg>
+    </div>
+  );
+}
