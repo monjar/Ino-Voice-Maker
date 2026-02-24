@@ -1,16 +1,26 @@
-# React + Vite
+# Ino Voice Maker
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A browser-based robot SFX designer built with React, Vite, and the Web Audio API.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Oscillator-based synthesis** - Square, Sawtooth, Triangle, and Sine waveforms for clean robotic sounds
+- **Interactive envelope editors** - Drag-and-drop SVG graphs for volume and pitch over time
+- **6 built-in presets** - Happy Chirp, Error Buzz, Success Ding, Robot Boop, Laser Zap, Coin Pickup
+- **Beginner-friendly UI** - Sliders, descriptions, and a How It Works section
+- **Randomize** - Shake up parameters for unexpected results
 
-## React Compiler
+## Getting Started
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+`ash
+npm install
+npm run dev
+`
 
-## Expanding the ESLint configuration
+Open http://localhost:5173 in your browser.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Tech Stack
+
+- React 19 + Vite 8
+- Tailwind CSS v4
+- Web Audio API (OscillatorNode, GainNode)
