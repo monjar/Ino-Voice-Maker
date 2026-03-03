@@ -12,8 +12,8 @@ export function lerp(a, b, t) {
 
 /** Format a Hz value as human-readable string */
 export function formatHz(v) {
-  if (v >= 1000) return ` kHz`;
-  return ` Hz`;
+  if (v >= 1000) return `${(v / 1000).toFixed(1)} kHz`;
+  return `${Math.round(v)} Hz`;
 }
 
 /**

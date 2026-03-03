@@ -33,7 +33,7 @@ export default function GraphEditor({
   const [dragIdx, setDragIdx] = useState(null);
   const [hoverInfo, setHoverInfo] = useState(null); // {x, y, value}
 
-  const pad = 36; // left padding for labels
+  const pad = 48; // left padding for labels
   const padR = 12;
   const padT = 12;
   const padB = 24; // bottom for time labels
