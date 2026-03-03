@@ -1,10 +1,10 @@
 import React, { useRef, useState } from "react";
 
 /**
- * ExportPanel — Buttons for exporting as WAV/MP4/JSON and importing from JSON.
+ * ExportPanel — Buttons for exporting as WAV/MP3/JSON and importing from JSON.
  */
-export default function ExportPanel({ onExportWav, onExportMp4, onExportJson, onImportJson }) {
-  const [exporting, setExporting] = useState(null); // 'wav' | 'mp4' | 'json' | null
+export default function ExportPanel({ onExportWav, onExportMp3, onExportJson, onImportJson }) {
+  const [exporting, setExporting] = useState(null); // 'wav' | 'mp3' | 'json' | null
   const fileInputRef = useRef(null);
 
   async function handleExport(type, fn) {
@@ -62,11 +62,11 @@ export default function ExportPanel({ onExportWav, onExportMp4, onExportJson, on
         </button>
 
         <button
-          onClick={() => handleExport("mp4", onExportMp4)}
+          onClick={() => handleExport("mp3", onExportMp3)}
           disabled={!!exporting}
-          className={btnClass("mp4")}
+          className={btnClass("mp3")}
         >
-          {exporting === "mp4" ? "Recording…" : "🎬 Export MP4 / WebM"}
+          {exporting === "mp3" ? "Encoding…" : "� Export MP3"}
         </button>
 
         <button
@@ -98,7 +98,7 @@ export default function ExportPanel({ onExportWav, onExportMp4, onExportJson, on
       </div>
 
       <p className="text-white/30 text-xs mt-2">
-        WAV = lossless audio · MP4/WebM = compressed · JSON = reloadable project file
+        WAV = lossless audio · MP3 = compressed · JSON = reloadable project file
       </p>
     </div>
   );

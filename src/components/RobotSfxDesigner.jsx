@@ -6,7 +6,7 @@ import ExportPanel from "./ExportPanel";
 import { audioEngine } from "../audio/AudioEngine";
 import { PRESETS } from "../audio/presets";
 import { clamp, formatHz } from "../utils/dsp";
-import { exportWav, exportMp4, exportJson } from "../utils/exporters";
+import { exportWav, exportMp3, exportJson } from "../utils/exporters";
 
 /**
  * RobotSfxDesigner — Main page component.
@@ -241,7 +241,7 @@ export default function RobotSfxDesigner() {
 
             <ExportPanel
               onExportWav={() => exportWav(getCurrentParams())}
-              onExportMp4={() => exportMp4(getCurrentParams())}
+              onExportMp3={() => exportMp3(getCurrentParams())}
               onExportJson={() => exportJson(getProjectState())}
               onImportJson={loadProject}
             />

@@ -1,8 +1,21 @@
 /**
- * Export utilities — WAV, MP4 (WebM audio), and JSON export.
+ * Export utilities — WAV, MP3, and JSON export.
  */
 
+import lamejs from "lamejs";
 import { audioEngine } from "../audio/AudioEngine";
+
+/**
+ * Convert float32 audio samples to Int16 array.
+ */
+function floatTo16Bit(float32Array) {
+  const int16 = new Int16Array(float32Array.length);
+  for (let i = 0; i < float32Array.length; i++) {
+    const s = Math.max(-1, Math.min(1, float32Array[i]));
+    int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return int16;
+}
 
 /**
  * Convert an AudioBuffer to a WAV Blob.
@@ -29,7 +42,7 @@ function audioBufferToWav(buffer) {
 
   // fmt sub-chunk
   writeString(view, 12, "fmt ");
-  view.setUint32(16, 16, true); // sub-chunk size
+  view.setUint32(16, 16, true);
   view.setUint16(20, format, true);
   view.setUint16(22, numChannels, true);
   view.setUint32(24, sampleRate, true);
@@ -41,11 +54,10 @@ function audioBufferToWav(buffer) {
   writeString(view, 36, "data");
   view.setUint32(40, dataLength, true);
 
-  // Write PCM samples
   let offset = 44;
   for (let i = 0; i < data.length; i++) {
     const sample = Math.max(-1, Math.min(1, data[i]));
-    const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+    const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
     view.setInt16(offset, int16, true);
     offset += 2;
   }
@@ -83,59 +95,33 @@ export async function exportWav(params, filename = "robot-sfx.wav") {
 }
 
 /**
- * Export the current sound as an .mp4 (actually WebM/Opus audio container).
- * Uses MediaRecorder on an OfflineAudioContext streamed through a live context.
+ * Export the current sound as an .mp3 file using lamejs.
  */
-export async function exportMp4(params, filename = "robot-sfx.mp4") {
-  // Render offline first to get the audio buffer
+export async function exportMp3(params, filename = "robot-sfx.mp3") {
   const buffer = await audioEngine.renderOffline(params);
+  const sampleRate = buffer.sampleRate;
+  const samples = floatTo16Bit(buffer.getChannelData(0));
 
-  // Create a live AudioContext to stream through MediaRecorder
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const dest = ctx.createMediaStreamDestination();
+  // Encode mono MP3 at 128 kbps
+  const encoder = new lamejs.Mp3Encoder(1, sampleRate, 128);
+  const mp3Chunks = [];
+  const blockSize = 1152;
 
-  const source = ctx.createBufferSource();
-  source.buffer = buffer;
-  source.connect(dest);
+  for (let i = 0; i < samples.length; i += blockSize) {
+    const chunk = samples.subarray(i, i + blockSize);
+    const mp3buf = encoder.encodeBuffer(chunk);
+    if (mp3buf.length > 0) {
+      mp3Chunks.push(new Uint8Array(mp3buf));
+    }
+  }
 
-  // Pick a supported mime type for the container
-  const mimeType = MediaRecorder.isTypeSupported("audio/mp4")
-    ? "audio/mp4"
-    : MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-    ? "audio/webm;codecs=opus"
-    : "audio/webm";
+  const end = encoder.flush();
+  if (end.length > 0) {
+    mp3Chunks.push(new Uint8Array(end));
+  }
 
-  const recorder = new MediaRecorder(dest.stream, { mimeType });
-  const chunks = [];
-
-  return new Promise((resolve, reject) => {
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
-
-    recorder.onstop = () => {
-      ctx.close().catch(() => {});
-      const ext = mimeType.includes("mp4") ? "mp4" : "webm";
-      const finalName = filename.replace(/\.\w+$/, `.${ext}`);
-      const blob = new Blob(chunks, { type: mimeType });
-      downloadBlob(blob, finalName);
-      resolve();
-    };
-
-    recorder.onerror = (e) => {
-      ctx.close().catch(() => {});
-      reject(e);
-    };
-
-    recorder.start();
-    source.start();
-
-    // Stop after the buffer duration + small buffer
-    const durationMs = Math.ceil(buffer.duration * 1000) + 100;
-    setTimeout(() => {
-      try { recorder.stop(); } catch { /* ok */ }
-    }, durationMs);
-  });
+  const blob = new Blob(mp3Chunks, { type: "audio/mpeg" });
+  downloadBlob(blob, filename);
 }
 
 /**
