@@ -191,6 +191,7 @@ export default function RobotSfxDesigner() {
               yMax={5000}
               yFormat={(v) => formatHz(v)}
               curveColor="#a78bfa"
+              isPitch
             />
 
             {/* How-it-works section */}

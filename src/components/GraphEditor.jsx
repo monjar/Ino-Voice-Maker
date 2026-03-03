@@ -1,11 +1,34 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { clamp } from "../utils/dsp";
+import { snapToNote, getNoteNameForFreq, ALL_NOTES } from "../utils/noteFrequencies";
+import {
+  getCurvePreset,
+  CURVE_PRESET_NAMES,
+  smoothCurve,
+  subdivideCurve,
+  snapToGrid,
+  snapXToGrid,
+} from "../utils/curveTools";
+
+/** Small toolbar button used in both graph editors */
+function ToolBtn({ children, active, onClick, title }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all border ${
+        active
+          ? "bg-white/15 border-white/25 text-white"
+          : "bg-white/5 border-white/8 text-white/50 hover:bg-white/10 hover:text-white/70"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 /**
- * GraphEditor — Interactive SVG envelope editor.
- *
- * Lets users click to add control points and drag them to shape
- * a piecewise-linear curve (volume or pitch over time).
+ * GraphEditor — Interactive SVG envelope editor with snap, smooth & preset tools.
  *
  * Props:
  *  - title        : heading text
@@ -16,6 +39,7 @@ import { clamp } from "../utils/dsp";
  *  - yFormat      : (number) => string for axis labels
  *  - curveColor   : stroke colour for the curve (default cyan)
  *  - height/width : SVG dimensions (scales responsively)
+ *  - isPitch      : if true, enables note-snap mode
  */
 export default function GraphEditor({
   title,
@@ -28,15 +52,21 @@ export default function GraphEditor({
   curveColor = "#22d3ee",
   height = 180,
   width = 600,
+  isPitch = false,
 }) {
   const svgRef = useRef(null);
   const [dragIdx, setDragIdx] = useState(null);
-  const [hoverInfo, setHoverInfo] = useState(null); // {x, y, value}
+  const [hoverInfo, setHoverInfo] = useState(null);
+  const [showPresets, setShowPresets] = useState(false);
 
-  const pad = 48; // left padding for labels
+  // Snap modes
+  const [snapY, setSnapY] = useState("off"); // "off" | "grid" | "notes"
+  const [snapX, setSnapX] = useState(false); // snap x to 5% steps
+
+  const pad = 48;
   const padR = 12;
   const padT = 12;
-  const padB = 24; // bottom for time labels
+  const padB = 24;
   const innerW = width - pad - padR;
   const innerH = height - padT - padB;
 
@@ -44,17 +74,43 @@ export default function GraphEditor({
   const gridY = 4;
 
   /** Convert data point → SVG coords */
-  const toSvg = (p) => ({
-    x: pad + p.x * innerW,
-    y: padT + (1 - clamp((p.y - yMin) / (yMax - yMin), 0, 1)) * innerH,
-  });
+  const toSvg = useCallback(
+    (p) => ({
+      x: pad + p.x * innerW,
+      y: padT + (1 - clamp((p.y - yMin) / (yMax - yMin), 0, 1)) * innerH,
+    }),
+    [innerW, innerH, yMin, yMax]
+  );
 
   /** Convert SVG coords → data point */
-  const fromSvg = (sx, sy) => {
-    const nx = clamp((sx - pad) / innerW, 0, 1);
-    const ny = clamp(1 - (sy - padT) / innerH, 0, 1);
-    return { x: nx, y: yMin + ny * (yMax - yMin) };
-  };
+  const fromSvg = useCallback(
+    (sx, sy) => {
+      const nx = clamp((sx - pad) / innerW, 0, 1);
+      const ny = clamp(1 - (sy - padT) / innerH, 0, 1);
+      return { x: nx, y: yMin + ny * (yMax - yMin) };
+    },
+    [innerW, innerH, yMin, yMax]
+  );
+
+  /** Apply active snap modes to a data point */
+  const applySnap = useCallback(
+    (dp, isFirstOrLast = false) => {
+      let { x, y } = dp;
+      // Snap X
+      if (snapX && !isFirstOrLast) {
+        x = snapXToGrid(x, 0.05);
+      }
+      // Snap Y
+      if (snapY === "grid") {
+        y = snapToGrid(y, yMin, yMax, 8);
+      } else if (snapY === "notes" && isPitch) {
+        y = snapToNote(y);
+        y = clamp(y, yMin, yMax);
+      }
+      return { x, y };
+    },
+    [snapX, snapY, yMin, yMax, isPitch]
+  );
 
   /** Build SVG path with filled area */
   const { pathD, areaD } = useMemo(() => {
@@ -68,9 +124,9 @@ export default function GraphEditor({
       ` L ${svgPts[svgPts.length - 1].x.toFixed(1)} ${(padT + innerH).toFixed(1)}` +
       ` L ${svgPts[0].x.toFixed(1)} ${(padT + innerH).toFixed(1)} Z`;
     return { pathD: line, areaD: area };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points, innerW, innerH, yMin, yMax]);
+  }, [points, toSvg, innerH]);
 
+  /* ---- Pointer handlers ---- */
   const onPointerDown = (e) => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -80,7 +136,6 @@ export default function GraphEditor({
     const mx = (e.clientX - rect.left) * scaleX;
     const my = (e.clientY - rect.top) * scaleY;
 
-    // Check if clicking near an existing point
     const sorted = [...points].sort((a, b) => a.x - b.x);
     const hitRadius = 14;
     for (let i = 0; i < sorted.length; i++) {
@@ -94,8 +149,8 @@ export default function GraphEditor({
       }
     }
 
-    // Add new point at click position
-    const np = fromSvg(mx, my);
+    let np = fromSvg(mx, my);
+    np = applySnap(np);
     setPoints((prev) => {
       const next = [...prev, np].sort((a, b) => a.x - b.x);
       next[0] = { ...next[0], x: 0 };
@@ -113,14 +168,16 @@ export default function GraphEditor({
     const mx = (e.clientX - rect.left) * scaleX;
     const my = (e.clientY - rect.top) * scaleY;
 
-    // Show hover info
     const dp = fromSvg(mx, my);
     if (mx >= pad && mx <= pad + innerW && my >= padT && my <= padT + innerH) {
+      const displayY = snapY === "notes" && isPitch
+        ? `${getNoteNameForFreq(dp.y)} (${yFormat(dp.y)})`
+        : yFormat(dp.y);
       setHoverInfo({
         svgX: mx,
         svgY: my,
         time: `${Math.round(dp.x * 100)}%`,
-        value: yFormat(dp.y),
+        value: displayY,
       });
     } else {
       setHoverInfo(null);
@@ -137,9 +194,10 @@ export default function GraphEditor({
       const minX = isFirst ? 0 : isLast ? 1 : left + 0.005;
       const maxX = isFirst ? 0 : isLast ? 1 : right - 0.005;
 
+      let snapped = applySnap(dp, isFirst || isLast);
       next[dragIdx] = {
-        x: clamp(dp.x, minX, maxX),
-        y: clamp(dp.y, yMin, yMax),
+        x: isFirst ? 0 : isLast ? 1 : clamp(snapped.x, minX, maxX),
+        y: clamp(snapped.y, yMin, yMax),
       };
       return next;
     });
@@ -147,11 +205,11 @@ export default function GraphEditor({
 
   const onPointerUp = () => setDragIdx(null);
 
+  /* ---- Tool actions ---- */
   const removeLastMiddlePoint = () => {
     setPoints((prev) => {
       if (prev.length <= 2) return prev;
       const next = [...prev];
-      // Remove the second-to-last point (last middle point)
       next.splice(next.length - 2, 1);
       return next;
     });
@@ -165,36 +223,143 @@ export default function GraphEditor({
     ]);
   };
 
+  const handleSmooth = () => {
+    setPoints((prev) => smoothCurve(prev, yMin, yMax, 0.6));
+  };
+
+  const handleSubdivide = () => {
+    setPoints((prev) => {
+      if (prev.length >= 20) return prev; // cap at 20 points
+      return subdivideCurve(prev, yMin, yMax);
+    });
+  };
+
+  const handlePresetCurve = (name) => {
+    const pts = getCurvePreset(name, yMin, yMax);
+    if (pts) setPoints(pts);
+    setShowPresets(false);
+  };
+
+  /* ---- Note grid lines for pitch snap ---- */
+  const noteGridLines = useMemo(() => {
+    if (snapY !== "notes" || !isPitch) return [];
+    // Show note lines within visible range (one per octave C + E + G for readability)
+    const lines = [];
+    const importantNotes = [
+      "C2","E2","G2","C3","E3","G3","C4","E4","G4",
+      "C5","E5","G5","C6","E6","G6","C7","C8",
+    ];
+    for (const note of ALL_NOTES) {
+      if (!importantNotes.includes(note.name)) continue;
+      if (note.freq < yMin || note.freq > yMax) continue;
+      const frac = (note.freq - yMin) / (yMax - yMin);
+      const svgY = padT + (1 - frac) * innerH;
+      lines.push({ y: svgY, label: note.name, freq: note.freq });
+    }
+    return lines;
+  }, [snapY, isPitch, yMin, yMax, innerH]);
+
+  /* ---- Tooltip width calculation ---- */
+  const tooltipWidth = hoverInfo ? Math.max(95, (hoverInfo.value?.length || 10) * 6.5 + 20) : 95;
+
   return (
     <div className="rounded-2xl bg-white/5 border border-white/10 p-4 shadow-lg">
       {/* Header */}
-      <div className="flex items-start justify-between gap-3 mb-3">
+      <div className="flex items-start justify-between gap-3 mb-2">
         <div>
           <h3 className="text-white font-semibold text-base">{title}</h3>
           {description && (
             <p className="text-white/50 text-sm mt-0.5">{description}</p>
           )}
-          <p className="text-white/40 text-xs mt-1">
-            Click to add points · Drag to shape · First &amp; last points stay at edges
-          </p>
-        </div>
-        <div className="flex gap-1.5 shrink-0">
-          <button
-            onClick={removeLastMiddlePoint}
-            className="px-2.5 py-1 rounded-lg bg-white/8 hover:bg-white/15 text-white/70 hover:text-white text-xs transition"
-            title="Remove the last middle point"
-          >
-            − Point
-          </button>
-          <button
-            onClick={resetToFlat}
-            className="px-2.5 py-1 rounded-lg bg-white/8 hover:bg-white/15 text-white/70 hover:text-white text-xs transition"
-            title="Reset to flat line"
-          >
-            Reset
-          </button>
         </div>
       </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+        {/* Snap section */}
+        <span className="text-white/30 text-[10px] font-semibold uppercase tracking-wider mr-0.5">
+          Snap:
+        </span>
+        <ToolBtn
+          active={snapY === "off" && !snapX}
+          onClick={() => { setSnapY("off"); setSnapX(false); }}
+          title="No snapping"
+        >
+          Off
+        </ToolBtn>
+        <ToolBtn
+          active={snapY === "grid"}
+          onClick={() => setSnapY(snapY === "grid" ? "off" : "grid")}
+          title="Snap Y to grid levels"
+        >
+          📊 Grid
+        </ToolBtn>
+        {isPitch && (
+          <ToolBtn
+            active={snapY === "notes"}
+            onClick={() => setSnapY(snapY === "notes" ? "off" : "notes")}
+            title="Snap to musical notes"
+          >
+            🎵 Notes
+          </ToolBtn>
+        )}
+        <ToolBtn
+          active={snapX}
+          onClick={() => setSnapX(!snapX)}
+          title="Snap time to 5% steps"
+        >
+          ⏱ Time
+        </ToolBtn>
+
+        <span className="w-px h-4 bg-white/10 mx-1" />
+
+        {/* Tools section */}
+        <span className="text-white/30 text-[10px] font-semibold uppercase tracking-wider mr-0.5">
+          Tools:
+        </span>
+        <ToolBtn onClick={handleSmooth} title="Smooth the curve (average neighbors)">
+          ✨ Smooth
+        </ToolBtn>
+        <ToolBtn onClick={handleSubdivide} title="Add midpoints between existing points">
+          ➕ Subdivide
+        </ToolBtn>
+        <ToolBtn onClick={removeLastMiddlePoint} title="Remove last middle point">
+          ➖ Point
+        </ToolBtn>
+        <ToolBtn onClick={resetToFlat} title="Reset to flat line">
+          ↩ Reset
+        </ToolBtn>
+
+        <span className="w-px h-4 bg-white/10 mx-1" />
+
+        {/* Preset curves */}
+        <div className="relative">
+          <ToolBtn
+            onClick={() => setShowPresets(!showPresets)}
+            active={showPresets}
+            title="Apply a preset curve shape"
+          >
+            📈 Shapes ▾
+          </ToolBtn>
+          {showPresets && (
+            <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1a2e] border border-white/15 rounded-lg shadow-2xl p-1 min-w-[150px] max-h-[240px] overflow-y-auto scrollbar-thin">
+              {CURVE_PRESET_NAMES.map((name) => (
+                <button
+                  key={name}
+                  onClick={() => handlePresetCurve(name)}
+                  className="block w-full text-left px-2.5 py-1.5 text-xs text-white/70 hover:bg-white/10 hover:text-white rounded transition"
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <p className="text-white/30 text-[10px] mb-1.5">
+        Click to add points · Drag to shape · First & last points stay at edges
+      </p>
 
       {/* SVG canvas */}
       <svg
@@ -231,6 +396,26 @@ export default function GraphEditor({
             />
           );
         })}
+
+        {/* Note grid lines (only when note snap is active) */}
+        {noteGridLines.map((nl, i) => (
+          <g key={`note-${i}`}>
+            <line
+              x1={pad} y1={nl.y} x2={pad + innerW} y2={nl.y}
+              stroke="rgba(167,139,250,0.15)" strokeWidth={1}
+              strokeDasharray="4,4"
+            />
+            <text
+              x={pad + innerW + 2}
+              y={nl.y + 3}
+              fill="rgba(167,139,250,0.45)"
+              fontSize="7"
+              fontFamily="monospace"
+            >
+              {nl.label}
+            </text>
+          </g>
+        ))}
 
         {/* Y-axis labels */}
         {Array.from({ length: gridY + 1 }).map((_, i) => {
@@ -288,9 +473,7 @@ export default function GraphEditor({
             const isEndpoint = i === 0 || i === arr.length - 1;
             return (
               <g key={`pt-${i}`} style={{ cursor: "grab" }}>
-                {/* Glow */}
                 <circle cx={s.x} cy={s.y} r={isEndpoint ? 10 : 8} fill={curveColor} opacity={0.15} />
-                {/* Dot */}
                 <circle
                   cx={s.x}
                   cy={s.y}
@@ -299,7 +482,6 @@ export default function GraphEditor({
                   stroke={isEndpoint ? curveColor : "#fff"}
                   strokeWidth={1.5}
                 />
-                {/* Invisible hit area */}
                 <circle cx={s.x} cy={s.y} r={16} fill="transparent" />
               </g>
             );
@@ -319,7 +501,7 @@ export default function GraphEditor({
             <rect
               x={hoverInfo.svgX + 8}
               y={hoverInfo.svgY - 22}
-              width={90}
+              width={tooltipWidth}
               height={20}
               rx={4}
               fill="rgba(0,0,0,0.75)"
@@ -337,10 +519,15 @@ export default function GraphEditor({
         )}
       </svg>
 
-      {/* Point count indicator */}
+      {/* Footer */}
       <div className="flex items-center justify-between mt-2">
         <span className="text-white/30 text-xs">
           {points.length} point{points.length !== 1 ? "s" : ""}
+          {snapY !== "off" && (
+            <span className="ml-2 text-white/20">
+              📍 Snap: {snapY === "grid" ? "Grid" : "Notes"}
+            </span>
+          )}
         </span>
         <span className="text-white/30 text-xs">
           ← Time →
