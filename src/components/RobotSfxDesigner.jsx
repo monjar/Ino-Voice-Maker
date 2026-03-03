@@ -2,9 +2,11 @@ import React, { useEffect, useState } from "react";
 import GraphEditor from "./GraphEditor";
 import ControlPanel from "./ControlPanel";
 import PresetPanel from "./PresetPanel";
+import ExportPanel from "./ExportPanel";
 import { audioEngine } from "../audio/AudioEngine";
 import { PRESETS } from "../audio/presets";
 import { clamp, formatHz } from "../utils/dsp";
+import { exportWav, exportMp4, exportJson } from "../utils/exporters";
 
 /**
  * RobotSfxDesigner — Main page component.
@@ -114,6 +116,20 @@ export default function RobotSfxDesigner() {
     setActivePreset(null);
   };
 
+  /** Collect all current parameters into a plain object */
+  function getCurrentParams() {
+    return { durationMs, waveform, masterGain, detune, volPoints, freqPoints };
+  }
+
+  /** Collect the full project state (for JSON export/import) */
+  function getProjectState() {
+    return {
+      version: 1,
+      name: activePreset || "Custom",
+      params: getCurrentParams(),
+    };
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
@@ -200,6 +216,12 @@ export default function RobotSfxDesigner() {
             <PresetPanel
               onApplyPreset={applyPreset}
               activePresetName={activePreset}
+            />
+
+            <ExportPanel
+              onExportWav={() => exportWav(getCurrentParams())}
+              onExportMp4={() => exportMp4(getCurrentParams())}
+              onExportJson={() => exportJson(getProjectState())}
             />
           </div>
         </div>
