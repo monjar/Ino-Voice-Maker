@@ -130,6 +130,27 @@ export default function RobotSfxDesigner() {
     };
   }
 
+  /** Load project state from a parsed JSON object */
+  function loadProject(data) {
+    try {
+      const p = data?.params;
+      if (!p || !Array.isArray(p.volPoints) || !Array.isArray(p.freqPoints)) {
+        throw new Error("Invalid project file — missing params or envelope points");
+      }
+      setDurationMs(p.durationMs ?? DEFAULT.durationMs);
+      setWaveform(p.waveform ?? DEFAULT.waveform);
+      setMasterGain(p.masterGain ?? DEFAULT.masterGain);
+      setDetune(p.detune ?? DEFAULT.detune);
+      setVolPoints([...p.volPoints]);
+      setFreqPoints([...p.freqPoints]);
+      setActivePreset(data.name === "Custom" ? null : data.name ?? null);
+      setStatus(`Loaded project "${data.name || "Untitled"}" from JSON`);
+    } catch (err) {
+      setStatus(`Import failed: ${err.message}`);
+      alert(`Could not load project: ${err.message}`);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
@@ -222,6 +243,7 @@ export default function RobotSfxDesigner() {
               onExportWav={() => exportWav(getCurrentParams())}
               onExportMp4={() => exportMp4(getCurrentParams())}
               onExportJson={() => exportJson(getProjectState())}
+              onImportJson={loadProject}
             />
           </div>
         </div>
