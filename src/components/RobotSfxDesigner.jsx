@@ -79,7 +79,7 @@ export default function RobotSfxDesigner() {
   function randomize() {
     setDurationMs((d) => clamp(Math.round(d * (0.7 + Math.random() * 0.6)), 80, 1500));
     setMasterGain((g) => clamp(parseFloat((g * (0.8 + Math.random() * 0.4)).toFixed(2)), 0.15, 0.8));
-    setDetune(Math.round((Math.random() - 0.5) * 100));
+    setDetune(Math.round((Math.random() - 0.5) * 1200));
 
     // Randomize waveforms
     const wfs = ["square", "sawtooth", "triangle", "sine"];

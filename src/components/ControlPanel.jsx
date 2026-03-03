@@ -103,13 +103,13 @@ export default function ControlPanel({
         />
 
         <Slider
-          label="Detune"
-          help="Slightly shift the pitch up or down for variation"
+          label="Detune (Chorus)"
+          help="Adds a second detuned oscillator for a thick, wobbly sound. 0 = clean single tone."
           value={detune}
           onChange={setDetune}
-          min={-100}
-          max={100}
-          step={1}
+          min={-1200}
+          max={1200}
+          step={10}
           unit="cents"
         />
       </div>
