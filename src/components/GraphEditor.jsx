@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clamp } from "../utils/dsp";
 import { snapToNote, getNoteNameForFreq, ALL_NOTES } from "../utils/noteFrequencies";
 import {
@@ -46,8 +46,8 @@ export default function GraphEditor({
   description,
   points,
   setPoints,
-  yMin,
-  yMax,
+  yMin: dataYMin,
+  yMax: dataYMax,
   yFormat,
   curveColor = "#22d3ee",
   height = 180,
@@ -55,13 +55,30 @@ export default function GraphEditor({
   isPitch = false,
 }) {
   const svgRef = useRef(null);
+  const containerRef = useRef(null);
+
+  // Drag state
   const [dragIdx, setDragIdx] = useState(null);
+  const dragStartRef = useRef(null); // stores origPoints & start data coords for multi-drag
+
+  // Hover & presets
   const [hoverInfo, setHoverInfo] = useState(null);
   const [showPresets, setShowPresets] = useState(false);
 
+  // Multi-select: Set of sorted-indices
+  const [selected, setSelected] = useState(new Set());
+
   // Snap modes
-  const [snapY, setSnapY] = useState("off"); // "off" | "grid" | "notes"
-  const [snapX, setSnapX] = useState(false); // snap x to 5% steps
+  const [snapY, setSnapY] = useState("off");
+  const [snapX, setSnapX] = useState(false);
+
+  // Vertical zoom: viewable Y range (defaults to full data range)
+  const [viewYMin, setViewYMin] = useState(dataYMin);
+  const [viewYMax, setViewYMax] = useState(dataYMax);
+
+  // Use view range for rendering; data range for clamping actual point values
+  const yMin = viewYMin;
+  const yMax = viewYMax;
 
   const pad = 48;
   const padR = 12;
@@ -96,20 +113,18 @@ export default function GraphEditor({
   const applySnap = useCallback(
     (dp, isFirstOrLast = false) => {
       let { x, y } = dp;
-      // Snap X
       if (snapX && !isFirstOrLast) {
         x = snapXToGrid(x, 0.05);
       }
-      // Snap Y
       if (snapY === "grid") {
-        y = snapToGrid(y, yMin, yMax, 8);
+        y = snapToGrid(y, dataYMin, dataYMax, 8);
       } else if (snapY === "notes" && isPitch) {
         y = snapToNote(y);
-        y = clamp(y, yMin, yMax);
+        y = clamp(y, dataYMin, dataYMax);
       }
       return { x, y };
     },
-    [snapX, snapY, yMin, yMax, isPitch]
+    [snapX, snapY, dataYMin, dataYMax, isPitch]
   );
 
   /** Build SVG path with filled area */
@@ -126,7 +141,96 @@ export default function GraphEditor({
     return { pathD: line, areaD: area };
   }, [points, toSvg, innerH]);
 
-  /* ---- Pointer handlers ---- */
+  /** Sorted points — used for rendering & index mapping */
+  const sortedPoints = useMemo(
+    () => [...points].sort((a, b) => a.x - b.x),
+    [points]
+  );
+
+  /* ================================================================ */
+  /*  Keyboard shortcuts                                               */
+  /* ================================================================ */
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onKeyDown = (e) => {
+      // Ctrl+A — select all
+      if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+        e.preventDefault();
+        setSelected(new Set(sortedPoints.map((_, i) => i)));
+      }
+      // Escape — deselect
+      if (e.key === "Escape") {
+        setSelected(new Set());
+      }
+      // Delete / Backspace — remove selected middle points
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selected.size === 0) return;
+        e.preventDefault();
+        setPoints((prev) => {
+          const sorted = [...prev].sort((a, b) => a.x - b.x);
+          const keep = sorted.filter((_, i) => {
+            if (i === 0 || i === sorted.length - 1) return true;
+            return !selected.has(i);
+          });
+          return keep.length >= 2 ? keep : prev;
+        });
+        setSelected(new Set());
+      }
+    };
+    el.addEventListener("keydown", onKeyDown);
+    return () => el.removeEventListener("keydown", onKeyDown);
+  }, [sortedPoints, selected, setPoints]);
+
+  /* ================================================================ */
+  /*  Vertical zoom                                                    */
+  /* ================================================================ */
+  const zoomY = useCallback(
+    (factor, center) => {
+      const range = viewYMax - viewYMin;
+      const newRange = range / factor;
+      const minRange = (dataYMax - dataYMin) * 0.02;
+      const maxRange = dataYMax - dataYMin;
+      const clampedRange = clamp(newRange, minRange, maxRange);
+      const centerFrac = (center - viewYMin) / range;
+      let newMin = center - centerFrac * clampedRange;
+      let newMax = center + (1 - centerFrac) * clampedRange;
+      if (newMin < dataYMin) { newMax += dataYMin - newMin; newMin = dataYMin; }
+      if (newMax > dataYMax) { newMin -= newMax - dataYMax; newMax = dataYMax; }
+      newMin = Math.max(dataYMin, newMin);
+      newMax = Math.min(dataYMax, newMax);
+      setViewYMin(Math.round(newMin * 1000) / 1000);
+      setViewYMax(Math.round(newMax * 1000) / 1000);
+    },
+    [viewYMin, viewYMax, dataYMin, dataYMax]
+  );
+
+  const resetZoom = useCallback(() => {
+    setViewYMin(dataYMin);
+    setViewYMax(dataYMax);
+  }, [dataYMin, dataYMax]);
+
+  const isZoomed = viewYMin !== dataYMin || viewYMax !== dataYMax;
+
+  // Scroll wheel zoom on SVG
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const rect = svg.getBoundingClientRect();
+      const scaleY = height / rect.height;
+      const my = (e.clientY - rect.top) * scaleY;
+      const frac = clamp(1 - (my - padT) / innerH, 0, 1);
+      const center = viewYMin + frac * (viewYMax - viewYMin);
+      const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+      zoomY(factor, center);
+    };
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, [zoomY, height, innerH, viewYMin, viewYMax]);
+
+  /* ---- Pointer handlers — multi-select & multi-drag ---- */
   const onPointerDown = (e) => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -136,19 +240,42 @@ export default function GraphEditor({
     const mx = (e.clientX - rect.left) * scaleX;
     const my = (e.clientY - rect.top) * scaleY;
 
-    const sorted = [...points].sort((a, b) => a.x - b.x);
     const hitRadius = 14;
-    for (let i = 0; i < sorted.length; i++) {
-      const s = toSvg(sorted[i]);
+    let hitSortedIdx = -1;
+    for (let i = 0; i < sortedPoints.length; i++) {
+      const s = toSvg(sortedPoints[i]);
       const dx = s.x - mx;
       const dy = s.y - my;
       if (dx * dx + dy * dy <= hitRadius * hitRadius) {
-        const origIdx = points.indexOf(sorted[i]);
-        setDragIdx(origIdx);
-        return;
+        hitSortedIdx = i;
+        break;
       }
     }
 
+    if (hitSortedIdx >= 0) {
+      const isCtrl = e.ctrlKey || e.metaKey;
+      if (isCtrl) {
+        // Toggle this point in selection
+        setSelected((prev) => {
+          const next = new Set(prev);
+          if (next.has(hitSortedIdx)) next.delete(hitSortedIdx);
+          else next.add(hitSortedIdx);
+          return next;
+        });
+      } else if (!selected.has(hitSortedIdx)) {
+        // If clicking unselected point without Ctrl, start fresh selection
+        setSelected(new Set([hitSortedIdx]));
+      }
+      // Start drag
+      const origIdx = points.indexOf(sortedPoints[hitSortedIdx]);
+      setDragIdx(origIdx);
+      const dp = fromSvg(mx, my);
+      dragStartRef.current = { dataX: dp.x, dataY: dp.y, origPoints: [...sortedPoints] };
+      return;
+    }
+
+    // Clicked empty area — deselect & add new point
+    setSelected(new Set());
     let np = fromSvg(mx, my);
     np = applySnap(np);
     setPoints((prev) => {
@@ -183,27 +310,42 @@ export default function GraphEditor({
       setHoverInfo(null);
     }
 
-    if (dragIdx == null) return;
+    if (dragIdx == null || !dragStartRef.current) return;
 
-    setPoints((prev) => {
-      const next = [...prev];
-      const isFirst = dragIdx === 0;
-      const isLast = dragIdx === prev.length - 1;
-      const left = dragIdx > 0 ? next[dragIdx - 1].x : 0;
-      const right = dragIdx < next.length - 1 ? next[dragIdx + 1].x : 1;
-      const minX = isFirst ? 0 : isLast ? 1 : left + 0.005;
-      const maxX = isFirst ? 0 : isLast ? 1 : right - 0.005;
+    // Compute delta in data space from drag start
+    const deltaX = dp.x - dragStartRef.current.dataX;
+    const deltaY = dp.y - dragStartRef.current.dataY;
+    const origPts = dragStartRef.current.origPoints;
 
-      let snapped = applySnap(dp, isFirst || isLast);
-      next[dragIdx] = {
-        x: isFirst ? 0 : isLast ? 1 : clamp(snapped.x, minX, maxX),
-        y: clamp(snapped.y, yMin, yMax),
-      };
-      return next;
+    // Determine which indices to move
+    const dragSortedIdx = sortedPoints.indexOf(points[dragIdx]);
+    const movingIndices = selected.size > 0 && selected.has(dragSortedIdx)
+      ? selected
+      : new Set([dragSortedIdx]);
+
+    setPoints(() => {
+      const next = origPts.map((p, i) => {
+        if (!movingIndices.has(i)) return { ...p };
+        const isFirst = i === 0;
+        const isLast = i === origPts.length - 1;
+        let newX = isFirst ? 0 : isLast ? 1 : p.x + deltaX;
+        let newY = p.y + deltaY;
+        newX = isFirst ? 0 : isLast ? 1 : clamp(newX, 0.005, 0.995);
+        newY = clamp(newY, dataYMin, dataYMax);
+        const snapped = applySnap({ x: newX, y: newY }, isFirst || isLast);
+        return {
+          x: isFirst ? 0 : isLast ? 1 : snapped.x,
+          y: snapped.y,
+        };
+      });
+      return next.sort((a, b) => a.x - b.x);
     });
   };
 
-  const onPointerUp = () => setDragIdx(null);
+  const onPointerUp = () => {
+    setDragIdx(null);
+    dragStartRef.current = null;
+  };
 
   /* ---- Tool actions ---- */
   const removeLastMiddlePoint = () => {
@@ -213,31 +355,35 @@ export default function GraphEditor({
       next.splice(next.length - 2, 1);
       return next;
     });
+    setSelected(new Set());
   };
 
   const resetToFlat = () => {
-    const mid = (yMin + yMax) / 2;
+    const mid = (dataYMin + dataYMax) / 2;
     setPoints([
       { x: 0, y: mid },
       { x: 1, y: mid },
     ]);
+    setSelected(new Set());
   };
 
   const handleSmooth = () => {
-    setPoints((prev) => smoothCurve(prev, yMin, yMax, 0.6));
+    setPoints((prev) => smoothCurve(prev, dataYMin, dataYMax, 0.6));
   };
 
   const handleSubdivide = () => {
     setPoints((prev) => {
-      if (prev.length >= 20) return prev; // cap at 20 points
-      return subdivideCurve(prev, yMin, yMax);
+      if (prev.length >= 20) return prev;
+      return subdivideCurve(prev, dataYMin, dataYMax);
     });
+    setSelected(new Set());
   };
 
   const handlePresetCurve = (name) => {
-    const pts = getCurvePreset(name, yMin, yMax);
+    const pts = getCurvePreset(name, dataYMin, dataYMax);
     if (pts) setPoints(pts);
     setShowPresets(false);
+    setSelected(new Set());
   };
 
   /* ---- Note grid lines for pitch snap ---- */
@@ -262,8 +408,14 @@ export default function GraphEditor({
   /* ---- Tooltip width calculation ---- */
   const tooltipWidth = hoverInfo ? Math.max(95, (hoverInfo.value?.length || 10) * 6.5 + 20) : 95;
 
+  const selText = selected.size > 0 ? ` · ${selected.size} selected` : "";
+
   return (
-    <div className="rounded-2xl bg-white/5 border border-white/10 p-4 shadow-lg">
+    <div
+      ref={containerRef}
+      tabIndex={0}
+      className="rounded-2xl bg-white/5 border border-white/10 p-4 shadow-lg outline-none focus:ring-1 focus:ring-white/15"
+    >
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
@@ -332,6 +484,24 @@ export default function GraphEditor({
 
         <span className="w-px h-4 bg-white/10 mx-1" />
 
+        {/* Zoom section */}
+        <span className="text-white/30 text-[10px] font-semibold uppercase tracking-wider mr-0.5">
+          Zoom:
+        </span>
+        <ToolBtn onClick={() => zoomY(1.4, (yMin + yMax) / 2)} title="Zoom in (vertical)">
+          🔍+
+        </ToolBtn>
+        <ToolBtn onClick={() => zoomY(1 / 1.4, (yMin + yMax) / 2)} title="Zoom out (vertical)">
+          🔍−
+        </ToolBtn>
+        {isZoomed && (
+          <ToolBtn onClick={resetZoom} title="Reset zoom to full range">
+            ↕ Fit
+          </ToolBtn>
+        )}
+
+        <span className="w-px h-4 bg-white/10 mx-1" />
+
         {/* Preset curves */}
         <div className="relative">
           <ToolBtn
@@ -358,7 +528,7 @@ export default function GraphEditor({
       </div>
 
       <p className="text-white/30 text-[10px] mb-1.5">
-        Click to add points · Drag to shape · First & last points stay at edges
+        Click to add · Drag to move · Ctrl+Click multi-select · Ctrl+A select all · Scroll to zoom Y · Del removes selected
       </p>
 
       {/* SVG canvas */}
@@ -466,22 +636,32 @@ export default function GraphEditor({
         />
 
         {/* Control points */}
-        {[...points]
-          .sort((a, b) => a.x - b.x)
-          .map((p, i, arr) => {
+        {sortedPoints.map((p, i, arr) => {
             const s = toSvg(p);
             const isEndpoint = i === 0 || i === arr.length - 1;
+            const isSel = selected.has(i);
             return (
               <g key={`pt-${i}`} style={{ cursor: "grab" }}>
-                <circle cx={s.x} cy={s.y} r={isEndpoint ? 10 : 8} fill={curveColor} opacity={0.15} />
+                {/* Selection ring */}
+                {isSel && (
+                  <circle
+                    cx={s.x} cy={s.y} r={isEndpoint ? 13 : 11}
+                    fill="none" stroke="#facc15" strokeWidth={2}
+                    opacity={0.7} strokeDasharray="3,2"
+                  />
+                )}
+                {/* Glow */}
+                <circle cx={s.x} cy={s.y} r={isEndpoint ? 10 : 8} fill={isSel ? "#facc15" : curveColor} opacity={0.15} />
+                {/* Dot */}
                 <circle
                   cx={s.x}
                   cy={s.y}
                   r={isEndpoint ? 5.5 : 4.5}
-                  fill={isEndpoint ? "#fff" : curveColor}
+                  fill={isSel ? "#facc15" : isEndpoint ? "#fff" : curveColor}
                   stroke={isEndpoint ? curveColor : "#fff"}
                   strokeWidth={1.5}
                 />
+                {/* Invisible hit area */}
                 <circle cx={s.x} cy={s.y} r={16} fill="transparent" />
               </g>
             );
@@ -522,10 +702,15 @@ export default function GraphEditor({
       {/* Footer */}
       <div className="flex items-center justify-between mt-2">
         <span className="text-white/30 text-xs">
-          {points.length} point{points.length !== 1 ? "s" : ""}
+          {points.length} point{points.length !== 1 ? "s" : ""}{selText}
           {snapY !== "off" && (
             <span className="ml-2 text-white/20">
               📍 Snap: {snapY === "grid" ? "Grid" : "Notes"}
+            </span>
+          )}
+          {isZoomed && (
+            <span className="ml-2 text-white/20">
+              🔍 {yFormat(viewYMin)} – {yFormat(viewYMax)}
             </span>
           )}
         </span>
