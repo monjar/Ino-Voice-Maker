@@ -87,7 +87,7 @@ export default function ControlPanel({
           value={durationMs}
           onChange={setDurationMs}
           min={50}
-          max={2000}
+          max={5000}
           step={10}
           unit="ms"
         />

@@ -3,6 +3,7 @@ import GraphEditor from "./GraphEditor";
 import ControlPanel from "./ControlPanel";
 import PresetPanel from "./PresetPanel";
 import ExportPanel from "./ExportPanel";
+import AudioImportPanel from "./AudioImportPanel";
 import { audioEngine } from "../audio/AudioEngine";
 import { PRESETS } from "../audio/presets";
 import { clamp, formatHz } from "../utils/dsp";
@@ -130,6 +131,18 @@ export default function RobotSfxDesigner() {
     };
   }
 
+  /** Load analyzed audio curves into the editor */
+  function handleAudioImport({ volPoints: vp, freqPoints: fp, durationMs: dur }) {
+    setDurationMs(clamp(dur, 50, 5000));
+    setVolPoints([...vp]);
+    setFreqPoints([...fp]);
+    setWaveform("sine");
+    setDetune(0);
+    setMasterGain(0.5);
+    setActivePreset(null);
+    setStatus(`Imported audio (${dur} ms) — edit the curves and hit Play`);
+  }
+
   /** Load project state from a parsed JSON object */
   function loadProject(data) {
     try {
@@ -163,7 +176,7 @@ export default function RobotSfxDesigner() {
             Create short robotic sound effects by shaping two graphs:
             <strong className="text-white/90"> Volume</strong> (how loud over time) and
             <strong className="text-white/90"> Pitch</strong> (how high/low over time).
-            Pick a preset to start, then drag the points to customize your sound.
+            Pick a preset, import your own voice recording, or start from scratch.
           </p>
         </header>
 
@@ -239,6 +252,8 @@ export default function RobotSfxDesigner() {
               onApplyPreset={applyPreset}
               activePresetName={activePreset}
             />
+
+            <AudioImportPanel onImport={handleAudioImport} />
 
             <ExportPanel
               onExportWav={() => exportWav(getCurrentParams())}
