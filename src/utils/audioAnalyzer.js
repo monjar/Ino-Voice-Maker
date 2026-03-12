@@ -159,6 +159,9 @@ export function analyzeAudio(audioBuffer, options = {}) {
     pitchConfidence = 0.3,
     minFreq = 60,
     maxFreq = 5000,
+    normalizePitch = true,
+    targetPitchMin = 200,
+    targetPitchMax = 3000,
   } = options;
 
   const sampleRate = audioBuffer.sampleRate;
@@ -197,9 +200,16 @@ export function analyzeAudio(audioBuffer, options = {}) {
   // Fill gaps in pitch (where detection failed) with interpolation
   const filledFreq = fillPitchGaps(rawFreq, rawConfidence, pitchConfidence, minFreq, maxFreq);
 
+  // Normalize pitch — map the detected range to the target range using log scale
+  // This preserves relative pitch intervals (e.g. octave relationships) while
+  // spreading the curve across the editor's useful range
+  const normalizedFreq = normalizePitch
+    ? normalizePitchEnvelope(filledFreq, targetPitchMin, targetPitchMax)
+    : filledFreq;
+
   // Apply smoothing
   const smoothedVol = applySmoothing(normVol, smoothing);
-  const smoothedFreq = applySmoothing(filledFreq, smoothing);
+  const smoothedFreq = applySmoothing(normalizedFreq, smoothing);
 
   // Convert to point arrays
   const volPoints = smoothedVol.map((v, i) => ({
@@ -237,6 +247,34 @@ export function analyzeAudio(audioBuffer, options = {}) {
       pitchConfidenceRate: Math.round((confidentFrames / resolution) * 100),
     },
   };
+}
+
+/**
+ * Normalize pitch envelope using log-frequency mapping.
+ * Maps the detected pitch range onto [targetMin, targetMax] while
+ * preserving relative pitch intervals (logarithmic scaling).
+ */
+function normalizePitchEnvelope(freqs, targetMin, targetMax) {
+  const valid = freqs.filter((f) => f != null && f > 0);
+  if (valid.length === 0) return freqs;
+
+  // Compute the actual detected range in log space
+  const logFreqs = valid.map((f) => Math.log2(f));
+  const srcMin = Math.min(...logFreqs);
+  const srcMax = Math.max(...logFreqs);
+  const srcRange = srcMax - srcMin;
+
+  const dstLogMin = Math.log2(targetMin);
+  const dstLogMax = Math.log2(targetMax);
+
+  return freqs.map((f) => {
+    if (f == null || f <= 0) return targetMin;
+    const logF = Math.log2(f);
+    // Map from source log range to destination log range
+    const t = srcRange > 0.01 ? (logF - srcMin) / srcRange : 0.5;
+    const mapped = dstLogMin + t * (dstLogMax - dstLogMin);
+    return Math.pow(2, mapped);
+  });
 }
 
 /**

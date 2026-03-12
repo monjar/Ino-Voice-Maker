@@ -19,6 +19,9 @@ export default function AudioImportPanel({ onImport }) {
   const [pitchConfidence, setPitchConfidence] = useState(0.3);
   const [minFreq, setMinFreq] = useState(60);
   const [maxFreq, setMaxFreq] = useState(5000);
+  const [normalizePitch, setNormalizePitch] = useState(true);
+  const [targetPitchMin, setTargetPitchMin] = useState(200);
+  const [targetPitchMax, setTargetPitchMax] = useState(3000);
 
   const handleFileSelect = useCallback(async (e) => {
     const file = e.target.files?.[0];
@@ -39,6 +42,9 @@ export default function AudioImportPanel({ onImport }) {
         pitchConfidence,
         minFreq,
         maxFreq,
+        normalizePitch,
+        targetPitchMin,
+        targetPitchMax,
       });
       setPreview(result);
       setState("preview");
@@ -49,7 +55,7 @@ export default function AudioImportPanel({ onImport }) {
 
     // Reset input so same file can be re-selected
     e.target.value = "";
-  }, [resolution, smoothing, pitchConfidence, minFreq, maxFreq]);
+  }, [resolution, smoothing, pitchConfidence, minFreq, maxFreq, normalizePitch, targetPitchMin, targetPitchMax]);
 
   /** Re-analyze with updated settings */
   const reanalyze = useCallback(() => {
@@ -61,12 +67,15 @@ export default function AudioImportPanel({ onImport }) {
         pitchConfidence,
         minFreq,
         maxFreq,
+        normalizePitch,
+        targetPitchMin,
+        targetPitchMax,
       });
       setPreview(result);
     } catch (err) {
       setError(err.message);
     }
-  }, [audioBuffer, resolution, smoothing, pitchConfidence, minFreq, maxFreq]);
+  }, [audioBuffer, resolution, smoothing, pitchConfidence, minFreq, maxFreq, normalizePitch, targetPitchMin, targetPitchMax]);
 
   /** Apply the analyzed curves to the main editor */
   const handleApply = useCallback(() => {
@@ -220,6 +229,46 @@ export default function AudioImportPanel({ onImport }) {
                 onChange={setMaxFreq}
                 format={(v) => `${(v / 1000).toFixed(1)} kHz`}
               />
+
+              {/* Pitch normalization section */}
+              <div className="border-t border-white/8 pt-2 mt-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="checkbox"
+                    checked={normalizePitch}
+                    onChange={(e) => setNormalizePitch(e.target.checked)}
+                    className="accent-amber-400 w-3 h-3"
+                  />
+                  <label className="text-white/50 text-[10px]">Normalize pitch range</label>
+                </div>
+                {normalizePitch && (
+                  <>
+                    <SliderControl
+                      label="Target Low"
+                      value={targetPitchMin}
+                      min={100}
+                      max={1000}
+                      step={25}
+                      onChange={setTargetPitchMin}
+                      format={(v) => `${v} Hz`}
+                    />
+                    <SliderControl
+                      label="Target High"
+                      value={targetPitchMax}
+                      min={500}
+                      max={5000}
+                      step={100}
+                      onChange={setTargetPitchMax}
+                      format={(v) => `${(v / 1000).toFixed(1)} kHz`}
+                    />
+                    <p className="text-white/30 text-[9px] mt-1">
+                      Maps detected pitch range onto target range using log scaling.
+                      Preserves relative intervals while spreading the curve.
+                    </p>
+                  </>
+                )}
+              </div>
+
               <button
                 onClick={reanalyze}
                 className="w-full px-2 py-1.5 rounded-lg text-xs font-medium
