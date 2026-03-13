@@ -68,6 +68,9 @@ export default function GraphEditor({
   // Multi-select: Set of sorted-indices
   const [selected, setSelected] = useState(new Set());
 
+  // Box-select state: { startX, startY, endX, endY } in SVG coords, null when inactive
+  const [boxSelect, setBoxSelect] = useState(null);
+
   // Snap modes
   const [snapY, setSnapY] = useState("off");
   const [snapX, setSnapX] = useState(false);
@@ -274,7 +277,15 @@ export default function GraphEditor({
       return;
     }
 
-    // Clicked empty area — deselect & add new point
+    // Clicked empty area
+    const isCtrlEmpty = e.ctrlKey || e.metaKey;
+    if (isCtrlEmpty) {
+      // Start box-select
+      setBoxSelect({ startX: mx, startY: my, endX: mx, endY: my });
+      return;
+    }
+
+    // Deselect & add new point
     setSelected(new Set());
     let np = fromSvg(mx, my);
     np = applySnap(np);
@@ -310,6 +321,12 @@ export default function GraphEditor({
       setHoverInfo(null);
     }
 
+    // Box-select drag
+    if (boxSelect) {
+      setBoxSelect((prev) => ({ ...prev, endX: mx, endY: my }));
+      return;
+    }
+
     if (dragIdx == null || !dragStartRef.current) return;
 
     // Compute delta in data space from drag start
@@ -343,6 +360,25 @@ export default function GraphEditor({
   };
 
   const onPointerUp = () => {
+    // Finalize box-select: select all points inside the rectangle
+    if (boxSelect) {
+      const x1 = Math.min(boxSelect.startX, boxSelect.endX);
+      const x2 = Math.max(boxSelect.startX, boxSelect.endX);
+      const y1 = Math.min(boxSelect.startY, boxSelect.endY);
+      const y2 = Math.max(boxSelect.startY, boxSelect.endY);
+
+      const newSel = new Set();
+      sortedPoints.forEach((p, i) => {
+        const s = toSvg(p);
+        if (s.x >= x1 && s.x <= x2 && s.y >= y1 && s.y <= y2) {
+          newSel.add(i);
+        }
+      });
+      setSelected(newSel);
+      setBoxSelect(null);
+      return;
+    }
+
     setDragIdx(null);
     dragStartRef.current = null;
   };
@@ -528,7 +564,7 @@ export default function GraphEditor({
       </div>
 
       <p className="text-white/30 text-[10px] mb-1.5">
-        Click to add · Drag to move · Ctrl+Click multi-select · Ctrl+A select all · Scroll to zoom Y · Del removes selected
+        Click to add · Drag to move · Ctrl+Click multi-select · Ctrl+Drag box-select · Ctrl+A select all · Scroll to zoom Y · Del removes selected
       </p>
 
       {/* SVG canvas */}
@@ -543,6 +579,7 @@ export default function GraphEditor({
         onPointerLeave={() => {
           onPointerUp();
           setHoverInfo(null);
+          setBoxSelect(null);
         }}
       >
         {/* Grid lines */}
@@ -696,6 +733,21 @@ export default function GraphEditor({
               {hoverInfo.time} → {hoverInfo.value}
             </text>
           </>
+        )}
+
+        {/* Box-select rectangle */}
+        {boxSelect && (
+          <rect
+            x={Math.min(boxSelect.startX, boxSelect.endX)}
+            y={Math.min(boxSelect.startY, boxSelect.endY)}
+            width={Math.abs(boxSelect.endX - boxSelect.startX)}
+            height={Math.abs(boxSelect.endY - boxSelect.startY)}
+            fill="rgba(250,204,21,0.08)"
+            stroke="#facc15"
+            strokeWidth={1}
+            strokeDasharray="4,3"
+            rx={2}
+          />
         )}
       </svg>
 
