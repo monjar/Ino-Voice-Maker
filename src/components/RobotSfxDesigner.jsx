@@ -256,9 +256,9 @@ export default function RobotSfxDesigner() {
             <AudioImportPanel onImport={handleAudioImport} />
 
             <ExportPanel
-              onExportWav={() => exportWav(getCurrentParams())}
-              onExportMp3={() => exportMp3(getCurrentParams())}
-              onExportJson={() => exportJson(getProjectState())}
+              onExportWav={(name) => exportWav(getCurrentParams(), name)}
+              onExportMp3={(name) => exportMp3(getCurrentParams(), name)}
+              onExportJson={(name) => exportJson(getProjectState(), name)}
               onImportJson={loadProject}
             />
           </div>
